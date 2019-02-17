@@ -1,0 +1,264 @@
+---
+title: "FIFA Data Analysis"
+author: "Konner Macias"
+date: "February 1, 2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Data and 
+```{r}
+df <- read.csv('Data/FifaTrainNew.csv', stringsAsFactors = F)
+```
+
+Understand structure
+```{r}
+str(df)
+```
+
+```{r}
+head(df)
+```
+
+
+```{r}
+library(ggplot2)
+ggplot(df, aes(Age, fill = Age)) + geom_density(position = "stack")
+```
+
+
+
+
+We will look for any correlation with the variables
+```{r}
+#install.packages("corrplot")
+library(corrplot)
+# select only numeric columns
+num_inds <- unlist(lapply(df, is.numeric))
+cor_matrix <- cor(df[num_inds])
+cor_matrix
+```
+
+Clean up club names.
+```{r}
+for (i in 1:length(df$Club))
+{
+  if (is.na(df$Club[i])) { next }
+  # replace with appropriate characters
+  club <- df$Club[i]
+  if (grepl('<e9>', club)) { df$Club[i] <- gsub("<e9>","é", club) }
+  else if (grepl('<f3>', club)) { df$Club[i] <- gsub("<f3>","o", club) }
+  else if (grepl('<f8>', club)) { df$Club[i] <- gsub("<f8>","o", club) }
+  else if (grepl('<d6>', club)) { df$Club[i] <- gsub("<d6>","o", club) }
+  else if (grepl('<e6>', club)) { df$Club[i] <- gsub("<e6>","a", club) }
+  else if (grepl('<e3>', club)) { df$Club[i] <- gsub("<e3>","a", club) }
+  else if (grepl('<e1>', club)) { df$Club[i] <- gsub("<e1>","a", club) }
+  else if (grepl('<c1>', club)) { df$Club[i] <- gsub("<c1>","a", club) }
+  else if (grepl('<ea>', club)) { df$Club[i] <- gsub("<ea>","ê", club) }
+  else if (grepl('<ee>', club)) { df$Club[i] <- gsub("<ee>","î", club) }
+  else if (grepl('<c7>', club)) { df$Club[i] <- gsub("<c7>","c", club) }
+  else if (grepl('<f6>', club)) { df$Club[i] <- gsub("<f6>","ö", club) }
+  else if (grepl('<fc>', club)) { df$Club[i] <- gsub("<fc>","u", club) }
+}
+```
+
+Let's complete all cases for now, handle the other stuff later.
+```{r}
+df <- df[-18]
+df.full <- df[complete.cases(df),]
+num_inds <- unlist(lapply(df.full, is.numeric))
+cor_matrix <- cor(df.full[num_inds])
+cor_matrix
+```
+
+Give me all the correlations against wage in decreasing order
+```{r}
+sort(cor_matrix[2,], decreasing = TRUE)
+```
+We will look at those with over .2 correlation
+```{r}
+top_cors <- as.data.frame(sort(cor_matrix[2,], decreasing = TRUE)[1:20])
+row.names(top_cors)
+```
+
+```{r}
+inds <- c()
+for (name in row.names(top_cors)) {
+  inds <- c(which(names(df.full)==name), inds)
+}
+cor_fin <- cor(df.full[inds])
+cor_fin
+```
+
+```{r}
+#install.packages("PerformanceAnalytics")
+library("PerformanceAnalytics")
+chart.Correlation(cor_fin, histogram = T, pch = 19)
+```
+
+
+
+3 stars: Intl Rep, Vision, dribbling, curve, longShots, FKAccuracy
+2 stars: Positioning, Closing, Volleys, SkillMoves, ShotPower
+```{r}
+top_vars <- c("International.Reputation","Vision","Dribbling","Curve","LongShots","FKAccuracy","Positioning","Closing","Volleys","Skill.Moves","ShotPower","WageNew")
+inds <- c()
+for (name in top_vars) {
+  inds <- c(which(names(df.full)==name), inds)
+}
+cor_sml <- cor(df.full[inds])
+```
+
+Look at relationships
+```{r}
+chart.Correlation(cor_sml, histogram = T, pch = 19)
+```
+
+
+
+Now, let's build optimal model
+```{r}
+library(leaps)
+library(car)
+bm <- regsubsets(WageNew ~ ShotPower + Skill.Moves + Volleys + Positioning + FKAccuracy + LongShots + Curve + Dribbling + Vision + International.Reputation, data = df.full,
+                 nbest=1, nvmax=NULL, force.in=NULL, force.out=NULL,method="exhaustive")
+bm.sum <- summary(bm)
+res.legend <-subsets(bm, statistic="adjr2", legend = FALSE, min.size = 3, max.size = 12, main = "Adjusted R^2")
+```
+
+Look at them
+```{r}
+which(bm.sum$which[8,] == TRUE)
+```
+
+```{r}
+m1 <- lm(WageNew ~ ShotPower + Skill.Moves + Volleys + FKAccuracy + LongShots + Dribbling + Vision + International.Reputation, data = df.full)
+summary(m1)
+vif(m1)
+```
+
+Solid model.
+```{r}
+par(mfrow=c(2,2))
+plot(m1)
+```
+
+
+lol ew.
+
+We need to transform WageNew.
+```{r}
+plot(density(log(df.full$WageNew),bw="SJ",kern="gaussian"), type="l",main="Gaussian
+kernel density estimate (After Transformation)",xlab="Wage New")
+```
+
+
+Better than nothing. Honestly, we should be created separate models? IDK
+
+Try some inverse response plot
+```{r}
+jumbo <- lm(WageNew ~ ShotPower + Skill.Moves + Volleys + FKAccuracy + LongShots + Dribbling + Vision + International.Reputation + Curve + Positioning, data = df.full)
+inverseResponsePlot(jumbo)
+summary(powerTransform(jumbo))
+```
+
+```{r}
+plot(density(I(df.full$WageNew)^(-0.2),bw="SJ",kern="gaussian"), type="l",main="Gaussian
+kernel density estimate (After Transformation)",xlab="Wage New")
+```
+
+```{r}
+bm.lam <- regsubsets(I(WageNew)^(-0.2) ~ ShotPower + Skill.Moves + Volleys + Positioning + FKAccuracy + LongShots + Curve + Dribbling + Vision + International.Reputation, data = df.full,
+                 nbest=1, nvmax=NULL, force.in=NULL, force.out=NULL,method="exhaustive")
+bm.sum <- summary(bm.lam)
+res.legend <-subsets(bm, statistic="adjr2", legend = FALSE, min.size = 3, max.size = 12, main = "Adjusted R^2")
+```
+
+```{r}
+which(bm.sum$which[8,] == TRUE)
+```
+
+```{r}
+m2 <- lm(I(WageNew)^(-0.2) ~ ShotPower + Skill.Moves + Volleys + Curve + LongShots + Dribbling + Vision + International.Reputation, data = df.full)
+summary(m2)
+vif(m2)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(m2)
+```
+
+A lot better.
+
+First let's do an 80/20 split
+```{r}
+set.seed(76776889)
+sam <- sample(nrow(df.full), nrow(df.full)*0.80)
+train <- df.full[sam,]
+test <- df.full[-sam,]
+```
+
+```{r}
+final_variables <- c("WageNew","ShotPower", "Skill.Moves", "Volleys", "Curve", "LongShots", "Dribbling", "Vision", "International.Reputation")
+inds <- c()
+for (name in final_variables) {
+  inds <- c(which(names(test)==name), inds)
+}
+
+testy <- test[inds]
+testy$WageNewPred <- I(predict(m2, testy))^-5
+row.names(testy) <- 1:nrow(testy)
+```
+
+Now see error
+```{r}
+sum((testy$WageNew - testy$WageNewPred)^2)/nrow(testy)
+mean(abs(testy$WageNew - testy$WageNewPred))
+```
+
+```{r}
+testy[testy$WageNew > 600000,]$WageNew = 600000
+```
+
+
+
+
+Let's make predictions
+```{r}
+test.df2 <- read.csv('Data/FifaTestNoYvalues.csv', stringsAsFactors = F)
+test.df <- test.df2[-17]
+test.df <- test.df[complete.cases(test.df),]
+```
+
+```{r}
+final_variables <- c("ShotPower", "Skill.Moves", "Volleys", "Curve", "LongShots", "Dribbling", "Vision", "International.Reputation")
+inds <- c()
+for (name in final_variables) {
+  inds <- c(which(names(test.df)==name), inds)
+}
+
+test.1 <- test.1[inds]
+test.1$WageNew <- I(predict(m2, test.1))^-5
+row.names(test.1) <- 1:nrow(test.1)
+head(test.1)
+
+# hack where if wage new is over 60000
+```
+
+```{r}
+test.1[test.1$WageNew > 600000,]$WageNew = 600000
+```
+
+```{r}
+test.1[test.1$WageNew > 590000,]
+```
+
+```{r}
+my_soln <- data.frame(Ob=1:nrow(test.1), WageNew=test.1$WageNew)
+write.csv(my_soln, file='pred1.csv', row.names=F)
+```
+
