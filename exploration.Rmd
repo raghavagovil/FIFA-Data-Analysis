@@ -26,9 +26,14 @@ head(df)
 
 ```{r}
 library(ggplot2)
-ggplot(df, aes(Age, fill = Age)) + geom_density(position = "stack")
+ggplot(df, aes(WageNew, fill = WageNew)) + geom_density(position = "stack")
 ```
 
+I'd like to look at the top wage values
+```{r}
+plot(sort(df$WageNew, decreasing = T)[1:250])
+plot(sort(df$WageNew, decreasing = T)[250:1000])
+```
 
 
 
